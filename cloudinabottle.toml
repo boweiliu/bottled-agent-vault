@@ -1,0 +1,56 @@
+[app]
+name = "agent-vault"
+version = "0.1.0"
+description = "Agent Vault (Infisical) credential broker for AI agents: web UI + API on the app subdomain, HTTPS-intercepting proxy on host port 14322"
+authors = ["bowei"]
+
+[runtime.container]
+image = "Dockerfile"
+port = 14321
+
+[routing]
+health_check = "/health"
+# Everything else (the web UI, and account creation/recovery) stays behind the
+# owner login. These are the API routes agents and the agent-vault CLI call
+# from other machines; Agent Vault authenticates them itself.
+public_paths = [
+  "/health",
+  "/discover",
+  "/v1/status",
+  "/v1/mitm",
+  "/v1/auth/login",
+  "/v1/auth/logout",
+  "/v1/auth/me",
+  "/v1/auth/sessions",
+  "/v1/auth/change-password",
+  "/v1/sessions",
+  "/v1/vaults",
+  "/v1/agents",
+  "/v1/credentials",
+  "/v1/proposals",
+  "/v1/skills",
+  "/v1/service-catalog",
+  "/v1/admin",
+  "/v1/users",
+  "/v1/instance",
+  # OAuth providers redirect back here cross-site, where the owner session
+  # cookie is refused, so the callback has to be reachable without it.
+  "/v1/oauth/callback",
+  "/oauth/complete",
+]
+
+[resources]
+memory_mb = 256
+cpu_cores = 0.25
+
+[data]
+app_data = true
+
+# The MITM proxy speaks plain HTTP CONNECT, not routable through the HTTP
+# router, so it is published directly on the host. The agent-vault CLI builds
+# the proxy URL as <app host>:<port the server advertises>, so the host port
+# must equal the container port.
+[[ports]]
+label = "mitm-proxy"
+container_port = 14322
+host_port = 14322
