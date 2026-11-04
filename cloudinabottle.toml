@@ -1,11 +1,12 @@
 [app]
 name = "agent-vault"
-version = "0.1.0"
+version = "0.2.0"
 description = "Agent Vault (Infisical) credential broker for AI agents: web UI + API on the app subdomain, HTTPS-intercepting proxy on host port 14322"
 authors = ["bowei"]
 
 [runtime.container]
 image = "Dockerfile"
+# auth_proxy.py, which signs the bottle owner in and forwards to Agent Vault.
 port = 14321
 
 [routing]
@@ -38,6 +39,12 @@ public_paths = [
   "/v1/oauth/callback",
   "/oauth/complete",
 ]
+
+# Owner-only page with the generated Agent Vault owner email + password, for
+# logging the agent-vault CLI in from another machine.
+[[links]]
+name = "CLI login details"
+path = "/_bottle/owner-login"
 
 [resources]
 memory_mb = 256

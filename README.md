@@ -14,14 +14,33 @@ credentials on the way out.
 
 ## What it runs
 
+```
+router (sets X-OpenHost-Is-Owner: true on owner requests)
+   |
+   v
+:14321  auth_proxy.py  --->  :14331  agent-vault web UI + API (internal)
+                             :14322  agent-vault MITM proxy (host port)
+```
+
 - The Agent Vault server (release binary copied out of the official
-  `infisical/agent-vault` image into an alpine base), with
-  - the web UI + API on the app's HTTP port `14321`, proxied by the router
-    at `https://<app>.<zone>/`
-  - the MITM forward proxy on `14322`, published on the host via `[[ports]]`
-    (it speaks plain HTTP `CONNECT`, which the HTTP router can't carry)
-- All state (SQLite database, MITM root CA) lives in the app's permanent data
-  dir, so it survives reloads and is included in the bottle's backups.
+  `infisical/agent-vault` image into an alpine base). Its MITM forward proxy
+  on `14322` is published on the host via `[[ports]]` (it speaks plain HTTP
+  `CONNECT`, which the HTTP router can't carry).
+- `auth_proxy.py`, the container's main process, in front of the web UI and
+  API on the router port. It does the Cloud in a Bottle owner sign-in, the
+  same way the catalog's Mealie and Calibre-Web packages do:
+  - on first boot it registers the Agent Vault owner account itself, as
+    `<your bottle username>@<zone>` with a generated password, stored in
+    `owner-credentials.json` (mode 0600) in the app data dir;
+  - when the bottle owner loads a page without a working Agent Vault
+    session, it logs in with those credentials, sets Agent Vault's own
+    `av_session` cookie and redirects back, so you never see Agent Vault's
+    sign-in form;
+  - everything else (agents and CLIs on the public API paths) is passed
+    through untouched and authenticated by Agent Vault itself.
+- All state (SQLite database, MITM root CA, owner credentials) lives in the
+  app's permanent data dir, so it survives reloads and is included in the
+  bottle's backups.
 
 ## Deploy
 
@@ -29,23 +48,25 @@ credentials on the way out.
 bottle app deploy https://github.com/boweiliu/bottled-agent-vault --name agent-vault --wait
 ```
 
-Then, straight away, open `https://agent-vault.<your-zone>/` (owner login
-required) and create the Agent Vault owner account. Registration only happens
-in the browser: the register endpoint is kept behind the bottle owner login,
-so nobody else can claim the instance or sign up.
+Then open `https://agent-vault.<your-zone>/`: you are signed in as the Agent
+Vault owner automatically. Nobody else can claim the instance or sign up: the
+owner account is created on first boot, and the register endpoint stays
+behind the bottle owner login.
 
 ## Access model
 
 | Path | Who can reach it |
 |---|---|
-| Web UI (`/`, `/login`, `/manage/...`, ...) | Bottle owner only (router login), then Agent Vault's own login |
+| Web UI (`/`, `/manage/...`, ...) | Bottle owner only (router login), signed in to Agent Vault automatically |
+| CLI login details (`/_bottle/owner-login`, linked on the app's dashboard page) | Bottle owner only |
 | Account creation / password reset (`/v1/auth/register`, `/v1/auth/forgot-password`, ...) | Bottle owner only |
 | Agent and CLI API (`/v1/sessions`, `/v1/vaults`, `/v1/mitm`, `/discover`, ...) | Public, authenticated by Agent Vault tokens |
 | MITM proxy, host port `14322` | Public, authenticated by Agent Vault tokens |
 
 ## Connecting an agent
 
-On the agent's machine, with the `agent-vault` CLI installed:
+On the agent's machine, with the `agent-vault` CLI installed, log in with the
+email and password shown on the "CLI login details" page:
 
 ```
 agent-vault auth login --address https://agent-vault.<your-zone>
@@ -71,15 +92,23 @@ points `HTTPS_PROXY` at `agent-vault.<your-zone>:14322`.
   (or a backup of it) can decrypt the stored credentials.
 - **Firewall.** `[[ports]]` publishes `14322` on the host but does not open a
   cloud firewall; allow inbound `14322/tcp` if your provider has one.
+- **Changing the owner password** in Agent Vault breaks automatic sign-in
+  (the proxy still has the old one). Put the new password in
+  `owner-credentials.json` to restore it.
 - Telemetry is off by default (`AGENT_VAULT_TELEMETRY=false`).
 
 ## Repo layout
 
 - `cloudinabottle.toml` - manifest: HTTP port `14321`, public API paths, one
-  `[[ports]]` entry for the proxy
+  `[[ports]]` entry for the proxy, a dashboard link to the CLI login details
 - `Dockerfile` - copies the `agent-vault` binary out of the official image
 - `entrypoint.sh` - points `HOME` at the app data dir, derives
-  `AGENT_VAULT_ADDR` from the app name and zone, and starts the server
+  `AGENT_VAULT_ADDR` and the owner email from the bottle env, and starts the
+  auth proxy
+- `auth_proxy.py` - starts and supervises the server, creates the owner, and
+  signs the bottle owner in (stdlib only)
+- `tests/` - end-to-end checks against a real binary:
+  `AGENT_VAULT_BIN=/path/to/agent-vault pytest tests/`
 
 ## License
 

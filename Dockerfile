@@ -6,13 +6,16 @@ FROM docker.io/infisical/agent-vault:0.40.2 AS upstream
 
 FROM docker.io/library/alpine:3.24
 
-RUN apk add --no-cache ca-certificates
+# python3 runs auth_proxy.py (stdlib only), the owner sign-in front.
+RUN apk add --no-cache ca-certificates python3
 COPY --from=upstream /usr/local/bin/agent-vault /usr/local/bin/agent-vault
 COPY entrypoint.sh /usr/local/bin/bottle-entrypoint.sh
+COPY auth_proxy.py /app/auth_proxy.py
 RUN chmod +x /usr/local/bin/bottle-entrypoint.sh
 
-# 14321 = web UI + API (proxied by the router on the app subdomain).
+# 14321 = auth proxy in front of the web UI + API (what the router forwards to).
 # 14322 = MITM forward proxy (published on the host via [[ports]]).
+# 14331 = Agent Vault's own API port, internal to the container.
 EXPOSE 14321 14322
 
 ENTRYPOINT ["/usr/local/bin/bottle-entrypoint.sh"]
